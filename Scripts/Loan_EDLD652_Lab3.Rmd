@@ -1,0 +1,171 @@
+---
+title: "Loan_EDLD652_Lab3"
+author: "Christopher Loan"
+date: "2/3/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = F, warning = F)
+```
+
+```{r}
+library(tidyverse)
+library(rio)
+library(here)
+#remotes::install_github("hrbrmstr/albersusa")
+library(albersusa)
+library(colorblindr)
+```
+
+```{r}
+honey <- import(here("Data", 'honeyproduction.csv')) 
+```
+
+# 1. Total production of honey across years
+
+
+```{r}
+plot1 <-
+honey %>% 
+  ggplot(aes(x = year, y = totalprod, group = state)) + 
+  geom_line(color = 'gray30', alpha = 0.2) + 
+  geom_line(data = filter(honey, state %in% c('WA', 'OR', 'CA')), aes(color = state, linetype = state)) + 
+  theme_minimal(base_size = 20) + 
+  labs(title = 'Honey production of US states over time', 
+       y = 'Total Production (lbs)', 
+       subtitle = 'West Coast States Highlighted',
+       x = 'Year', 
+       color = 'State', 
+       linetype = 'State') +
+  theme(plot.title = element_text(face = 'bold'), 
+        plot.subtitle = element_text(face = 'italic'), 
+        axis.text.y = element_text(angle = 45), 
+        plot.title.position = "plot")
+plot1
+```
+
+# 2. Reproduce plot with colorblind and desaturated palettes
+
+```{r}
+cvd_grid(plot1 + theme_void())
+```
+
+
+# 3. Reproduce plot with colorblind safe palette
+
+```{r}
+plot1 + scale_color_OkabeIto()
+```
+
+# 4. Regions & Divisions
+
+## join files
+
+```{r}
+us <- usa_sf()
+regions <- import("https://raw.githubusercontent.com/cphalpert/census-regions/master/us%20census%20bureau%20regions%20and%20divisions.csv") %>% janitor::clean_names()
+dat_state <- 
+honey %>% 
+  group_by(state) %>% 
+  summarize(average_prod = mean(totalprod),
+            se_prod = sd(totalprod)/sqrt(n())) %>% 
+  left_join(regions, by = c('state' ='state_code')) %>% 
+  rename(state_name = 'state.y') %>% 
+  left_join(us, by = c('state_name' = 'name'))
+```
+
+## bar plot (average honey for state)
+
+```{r}
+dat_state %>% 
+  ggplot(aes(x = average_prod, y = fct_reorder(state, average_prod), fill = region), color = 'white') +   geom_col() + 
+  geom_errorbar(aes(xmin = average_prod - se_prod, xmax = average_prod + se_prod)) +
+  theme_minimal(base_size = 20) +
+  labs(title = 'Average Yearly Honey Production',
+       subtitle = 'Error bars represent standard error of the mean',
+       x = 'Honey Production (lbs)',
+       y = 'State', 
+       fill = 'Region') + 
+  theme(plot.title = element_text(face = 'bold'), 
+        plot.subtitle = element_text(face = 'italic'), 
+        axis.text.y = element_text(angle = 20), 
+        plot.title.position = "plot"
+        ) +
+  scale_fill_viridis_d(option = 'cividis')
+```
+
+## patterns
+
+The majority of the honey is made from the same handful of states. The range in honey production varies, depending on the state but the highest producing states have the most variability over time. Very few states in the Northeast US produce a large amount of honey. 
+
+# 5. Heatmap by region
+
+```{r}
+dat_regions <- 
+honey %>% 
+  left_join(regions, by = c('state' ='state_code')) %>% 
+  rename(state_name = 'state.y') %>% 
+  left_join(us, by = c('state_name' = 'name')) %>% 
+  group_by(region, year) %>% 
+  summarize(region_avg = mean(totalprod),
+            region_se = sd(totalprod)/sqrt(n()))
+  
+```
+
+```{r}
+dat_regions %>% 
+  ggplot(aes(x = year, y = fct_reorder(region, region_avg), fill = region_avg)) +
+  geom_tile(color = 'white') + 
+  geom_point(aes(size = region_se), shape = 21, color = 'white', show.legend = F)+
+  coord_fixed() + 
+  scale_fill_viridis_c(option = 'cividis') +
+  scale_x_continuous(breaks = 1998:2012, expand = c(0,0)) +
+  theme_minimal() +
+  labs(y = 'Region', 
+       x = 'Year', 
+       title = 'Heatmap of honey production in United States by Region', 
+       subtitle = 'Radius of circle shows standard error of mean for each region within a year', 
+       fill = "Honey (lbs)"
+  ) + 
+  theme(plot.title = element_text(face = 'bold'), 
+        plot.subtitle = element_text(face = 'italic'), 
+        axis.text.y = element_text(angle = 20), 
+        axis.text.x = element_text(angle = 20, hjust = 1), 
+        plot.title.position = "plot",
+        ) 
+```
+
+# 6. Additional plot
+
+```{r}
+map_dat <- 
+dat_state %>% 
+  select(state, average_prod, se_prod, region, state_name) %>% 
+  full_join(
+    dat_regions %>% select(region, region_avg, region_se), by = c('region')) %>% 
+  full_join(regions, by = c('state' ='state_code', 'region', 'state_name' = 'state')) %>% 
+  full_join(us, by = c('state_name' = 'name')) %>% 
+  mutate(average_prod = replace_na(average_prod, 0))
+```
+
+```{r}
+map_dat %>%  
+  ggplot(aes(fill = average_prod, 
+             geometry = geometry)) +
+  geom_sf(color = 'gray70') +
+  theme_void() +
+  labs(title = 'Average Yearly Honey Production of US States',
+       subtitle = 'Data gathered from 1998 to 2012',
+       fill = 'Honey (lbs)') +
+  theme(plot.title = element_text(face = 'bold'), 
+        plot.subtitle = element_text(face = 'italic'), 
+        plot.title.position = "plot"
+        ) +
+  scale_fill_viridis_c(option = 'cividis')
+```
+
+
